@@ -20,9 +20,8 @@ header ethernet_t {
 }
 
 header myTunnel_t {
-    bit<32> srcIP;
-    bit<32> dstIP;
-    bit<8>  protocol;
+    bit<16> proto_id;
+    bit<16> dst_id;
 }
 
 header ipv4_t {
@@ -74,7 +73,8 @@ parser MyParser(packet_in packet,
 
     state parse_myTunnel {
         packet.extract(hdr.myTunnel);
-        transition accept;
+        // Require no parsing on ipv4
+        transition accept; // select(hdr.myTunnel.proto_id)
     }
 
     state parse_ipv4 {
@@ -100,65 +100,76 @@ control MyVerifyChecksum(inout headers hdr, inout metadata meta) {
 control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
+
     action drop() {
         mark_to_drop();
     }
     
-    // just forward packets
-    action forward(egressSpec_t port) {
+    action ipv4_forward(egressSpec_t port) {
         standard_metadata.egress_spec = port;
+        // Require no MAC updatings
+        // hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
+        // hdr.ethernet.dstAddr = dstAddr;
+        hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
     }
-    
-    table tunnel_forward {
-        key = {
-            hdr.myTunnel.dstIP: lpm;
-        }
-        actions = {
-            forward;
-            drop;
-            NoAction;
-        }
-        size = 1024;
-        default_action = NoAction();
-    }
-    
-    action add_myTunnel() {
+
+    action myTunnel_ingress(bit<16> dst_id) {
         hdr.myTunnel.setValid();
+        hdr.myTunnel.dst_id = dst_id;
+        hdr.myTunnel.proto_id = hdr.ethernet.etherType;
         hdr.ethernet.etherType = TYPE_MYTUNNEL;
-        hdr.myTunnel.srcIP = hdr.ipv4.srcAddr;
-        hdr.myTunnel.dstIP = hdr.ipv4.dstAddr;
-        hdr.myTunnel.protocol = hdr.ipv4.protocol;
     }
-
-    action remove() {
-        hdr.ethernet.etherType = TYPE_IPV4;
-        hdr.myTunnel.setInvalid();
-    }
-
-    table remove_myTunnel {
+    
+    table ipv4_lpm {
         key = {
-            hdr.myTunnel.dstIP: lpm;
+            hdr.ipv4.dstAddr: lpm;
         }
         actions = {
-            remove;
+            ipv4_forward;
+            myTunnel_ingress;
             drop;
             NoAction;
         }
         size = 1024;
         default_action = NoAction();
+    }
+
+    direct_counter(CounterType.packets_and_bytes) tunnelCount;
+
+    action myTunnel_forward(egressSpec_t port) {
+        standard_metadata.egress_spec = port;
+        tunnelCount.count();
+    }
+
+    action myTunnel_egress(egressSpec_t port) {
+        standard_metadata.egress_spec = port;
+        hdr.myTunnel.setInvalid();
+        tunnelCount.count();
+    }
+
+    table myTunnel_exact {
+        key = {
+            hdr.myTunnel.dst_id: exact;
+        }
+        actions = {
+            myTunnel_forward;
+            myTunnel_egress;
+            drop;
+        }
+        size = 1024;
+        counters = tunnelCount;
+        default_action = drop();
     }
 
     apply {
-        if (!hdr.myTunnel.isValid()) {
-            if (hdr.ipv4.isValid()) {
-                add_myTunnel();
-            } else {
-                drop();
-            }
-        } 
-        tunnel_forward.apply();
+        if (hdr.ipv4.isValid() && !hdr.myTunnel.isValid()) {
+            // Process only non-tunneled IPv4 packets.
+            ipv4_lpm.apply();
+        }
+
         if (hdr.myTunnel.isValid()) {
-            remove_myTunnel.apply();
+            // Process all tunneled packets.
+            myTunnel_exact.apply();
         }
     }
 }
@@ -177,8 +188,24 @@ control MyEgress(inout headers hdr,
 *************   C H E C K S U M    C O M P U T A T I O N   **************
 *************************************************************************/
 
-control MyComputeChecksum(inout headers hdr, inout metadata meta) {
-     apply {  }
+control MyComputeChecksum(inout headers  hdr, inout metadata meta) {
+     apply {
+        update_checksum(
+            hdr.ipv4.isValid(),
+            { hdr.ipv4.version,
+              hdr.ipv4.ihl,
+              hdr.ipv4.diffserv,
+              hdr.ipv4.totalLen,
+              hdr.ipv4.identification,
+              hdr.ipv4.flags,
+              hdr.ipv4.fragOffset,
+              hdr.ipv4.ttl,
+              hdr.ipv4.protocol,
+              hdr.ipv4.srcAddr,
+              hdr.ipv4.dstAddr },
+            hdr.ipv4.hdrChecksum,
+            HashAlgorithm.csum16);
+    }
 }
 
 /*************************************************************************

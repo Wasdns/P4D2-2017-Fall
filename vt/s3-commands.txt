@@ -1,2 +1,2 @@
-table_add tunnel_forward forward 10.0.0.2/32 => 1
-table_add tunnel_forward forward 10.0.0.5/32 => 2
+table_add myTunnel_exact myTunnel_forward 2 => 1
+table_add myTunnel_exact myTunnel_forward 5 => 2
