@@ -1,5 +1,5 @@
-table_add ipv4_lpm myTunnel_ingress 10.0.0.4/32 => 4
-table_add ipv4_lpm myTunnel_ingress 10.0.0.5/32 => 5
+table_add ipv4_lpm myTunnel_ingress 10.0.4.4/32 => 4
+table_add ipv4_lpm myTunnel_ingress 10.0.4.5/32 => 5
 table_add myTunnel_exact myTunnel_forward 4 => 4
 table_add myTunnel_exact myTunnel_forward 5 => 5
 table_add myTunnel_exact myTunnel_egress 1 => 1
