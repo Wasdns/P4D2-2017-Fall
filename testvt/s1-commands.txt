@@ -1,0 +1,2 @@
+table_add ipv4_lpm myTunnel_ingress 10.0.0.4/32 => 4 4
+table_add ipv4_lpm myTunnel_ingress 10.0.0.5/32 => 5 5

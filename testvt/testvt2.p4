@@ -107,17 +107,16 @@ control MyIngress(inout headers hdr,
     
     action ipv4_forward(egressSpec_t port) {
         standard_metadata.egress_spec = port;
-        // Require no MAC updatings
-        // hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
-        // hdr.ethernet.dstAddr = dstAddr;
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
     }
 
-    action myTunnel_ingress(bit<16> dst_id) {
-        hdr.myTunnel.setValid();
-        hdr.myTunnel.dst_id = dst_id;
-        hdr.myTunnel.proto_id = hdr.ethernet.etherType;
-        hdr.ethernet.etherType = TYPE_MYTUNNEL;
+    action myTunnel_ingress(bit<16> dst_id, egressSpec_t port) {
+        // hdr.myTunnel.setValid();
+        // hdr.myTunnel.dst_id = dst_id;
+        // hdr.myTunnel.proto_id = hdr.ethernet.etherType;
+        // hdr.ethernet.etherType = TYPE_MYTUNNEL;
+        // unknown bug here
+        standard_metadata.egress_spec = port;
     }
     
     table ipv4_lpm {
@@ -134,42 +133,10 @@ control MyIngress(inout headers hdr,
         default_action = drop();
     }
 
-    direct_counter(CounterType.packets_and_bytes) tunnelCount;
-
-    action myTunnel_forward(egressSpec_t port) {
-        standard_metadata.egress_spec = port;
-        tunnelCount.count();
-    }
-
-    action myTunnel_egress(egressSpec_t port) {
-        standard_metadata.egress_spec = port;
-        hdr.myTunnel.setInvalid();
-        tunnelCount.count();
-    }
-
-    table myTunnel_exact {
-        key = {
-            hdr.myTunnel.dst_id: exact;
-        }
-        actions = {
-            myTunnel_forward;
-            myTunnel_egress;
-            drop;
-        }
-        size = 1024;
-        counters = tunnelCount;
-        default_action = drop();
-    }
-
     apply {
         if (hdr.ipv4.isValid() && !hdr.myTunnel.isValid()) {
             // Process only non-tunneled IPv4 packets.
             ipv4_lpm.apply();
-        }
-
-        if (hdr.myTunnel.isValid()) {
-            // Process all tunneled packets.
-            myTunnel_exact.apply();
         }
     }
 }
@@ -232,4 +199,3 @@ MyEgress(),
 MyComputeChecksum(),
 MyDeparser()
 ) main;
-
